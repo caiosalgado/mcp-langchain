@@ -39,7 +39,8 @@ SALES_KEYWORDS = [
     'quantidade', 'data', 'período', 'categoria', 'preço',
     'sales', 'product', 'customer', 'revenue', 'quantity',
     'date', 'period', 'category', 'price', 'estatística',
-    'statistics', 'trend', 'análise', 'analysis'
+    'statistics', 'trend', 'análise', 'analysis', 'valor', 'total',
+    'hoje', 'semana', 'mês', 'venda', 'vendas'
 ]
 
 # ========================
