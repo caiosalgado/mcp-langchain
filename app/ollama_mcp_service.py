@@ -20,6 +20,7 @@ from app.constants import (
     ERROR_QUESTION_NOT_RELATED, ERROR_PROCESSING_QUESTION,
     MODEL_DISPLAY_NAME
 )
+from app.database import get_sales_data_availability_info
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +64,12 @@ class OllamaMCPSalesService:
         self.system_prompt_template = None
     
     def _create_system_prompt_with_date(self) -> str:
-        """Create system prompt with current date and context"""
+        """Create system prompt with current date and dynamic data availability info"""
         current_date = _get_current_date()
         current_datetime = _get_current_datetime()
+        
+        # Get dynamic data availability info using SQLAlchemy
+        data_availability = get_sales_data_availability_info()
         
         system_prompt = f"""Você é um especialista em análise de dados de vendas.
 
@@ -74,13 +78,21 @@ CONTEXTO TEMPORAL:
 - Data/hora atual: {current_datetime}
 - Quando o usuário mencionar "hoje", "esta semana", "este mês" ou "período recente", use a data atual como referência.
 
+DADOS DISPONÍVEIS:
+{data_availability}
+
 INSTRUÇÕES:
 1. Responda sempre em português brasileiro
 2. Use as ferramentas MCP disponíveis para consultar o banco de dados
 3. Seja preciso com datas e períodos ao fazer consultas SQL
-4. Se os dados não cobrirem o período solicitado, explique claramente
+4. Se os dados não cobrirem o período solicitado, explique claramente a limitação
+5. Ao fazer consultas SQL com datas, use o formato YYYY-MM-DD para compatibilidade
+6. Para consultas de "hoje", use a data atual como referência e verifique se há dados para esse período
 
-IMPORTANTE: Os dados de vendas no banco cobrem o período de janeiro 2025 a março 2025. Se o usuário perguntar sobre períodos fora dessa faixa, informe sobre a limitação dos dados disponíveis.
+EXEMPLOS DE CONSULTAS TEMPORAIS:
+- Para "hoje": WHERE date(sale_date) = '{datetime.datetime.now().strftime('%Y-%m-%d')}'
+- Para "esta semana": WHERE sale_date >= date('now', 'weekday 0', '-7 days')
+- Para "este mês": WHERE strftime('%Y-%m', sale_date) = '{datetime.datetime.now().strftime('%Y-%m')}'
 
 Responda de forma clara e objetiva."""
 
@@ -174,7 +186,8 @@ Responda de forma clara e objetiva."""
                     "question": question,
                     "mcp_tools_used": [],
                     "error": ERROR_QUESTION_NOT_RELATED,
-                    "context_date": _get_current_date()
+                    "context_date": _get_current_date(),
+                    "data_availability": get_sales_data_availability_info()
                 }
             
             # Use the agent to process the question
@@ -208,7 +221,8 @@ Responda de forma clara e objetiva."""
                 "error": None,
                 "model_used": MODEL_DISPLAY_NAME,
                 "context_date": _get_current_date(),
-                "context_datetime": _get_current_datetime()
+                "context_datetime": _get_current_datetime(),
+                "data_availability": get_sales_data_availability_info()
             }
             
         except Exception as e:
@@ -218,7 +232,8 @@ Responda de forma clara e objetiva."""
                 "question": question,
                 "mcp_tools_used": [],
                 "error": str(e),
-                "context_date": _get_current_date()
+                "context_date": _get_current_date(),
+                "data_availability": get_sales_data_availability_info()
             }
     
     async def close(self):
