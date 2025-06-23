@@ -1,6 +1,6 @@
-# Sales Analysis API - Teste Técnico
+# Sales Analysis API - LLM + MCP Integration
 
-Uma API REST construída com FastAPI que utiliza **Ollama (LLM local)** + **MCP (Model Context Protocol)** para processar perguntas em linguagem natural sobre dados de vendas.
+Uma API REST construída com FastAPI que utiliza **Ollama (LLM local)** + **MCP (Model Context Protocol)** para processar perguntas em linguagem natural sobre dados de vendas com **alta precisão** e **timestamp-safe queries**.
 
 ## 🎯 Objetivo
 
@@ -8,6 +8,7 @@ Esta API fornece insights sobre dados de vendas através de:
 - **Processamento de linguagem natural**: Use um modelo LLM local (Ollama) para fazer perguntas sobre vendas em português ou inglês
 - **MCP (Model Context Protocol)**: Protocolo padronizado para conectar o LLM ao banco de dados
 - **RAG (Retrieval-Augmented Generation)**: O modelo é forçado a buscar informações diretamente do banco de dados
+- **Timestamp-Safe Queries**: Correção automática de bugs comuns em consultas de data com timestamps
 - **Dados limpos**: Usa apenas os dados exatos do `script_dump_banco.txt` fornecido
 
 ## 🚀 Funcionalidades
@@ -17,13 +18,19 @@ Esta API fornece insights sobre dados de vendas através de:
 1. **GET /sales-insights?question={question}**
    - Processa perguntas em linguagem natural sobre dados de vendas
    - Utiliza Ollama (modelo local qwen3:30b) com MCP para converter perguntas em consultas SQL
-   - Retorna respostas em português brasileiro
+   - **5 ferramentas MCP especializadas** para diferentes tipos de consulta
+   - Retorna respostas em português brasileiro com contexto temporal
 
 2. **GET /top-products**
    - Retorna os 5 produtos mais vendidos no último período
 
 3. **GET /stats**
    - Retorna estatísticas gerais de vendas
+
+4. **Interface de Chat Interativo**
+   - Execute `uv run python chat.py` para interface terminal em português
+   - Conversação natural com tratamento de erros
+   - Comandos: 'sair', 'help', 'ajuda'
 
 ## 🛠️ Tecnologias Utilizadas
 
@@ -60,8 +67,8 @@ python --version
 
 ### 1. Clone o repositório
 ```bash
-git clone <repository-url>
-cd langchain_fastapi
+git clone https://github.com/caiosalgado/mcp-langchain.git
+cd mcp-langchain
 ```
 
 ### 2. Instale as dependências com UV
@@ -91,17 +98,47 @@ Em um terminal separado:
 uv run python mcp_server.py --port 8001
 ```
 
-O servidor MCP fornece as seguintes ferramentas:
-- `query_sales_data`: Executa consultas SQL SELECT
-- `get_database_schema`: Retorna a estrutura do banco
-- `get_sales_statistics`: Retorna estatísticas gerais
-- `analyze_sales_trends`: Analisa tendências de vendas
+O servidor MCP fornece **5 ferramentas especializadas**:
+- 🔍 `query_sales_data`: Executa consultas SQL SELECT customizadas
+- 📋 `get_database_schema`: Retorna estrutura do banco com avisos sobre timestamps
+- 📊 `get_sales_statistics`: Estatísticas gerais de vendas
+- 📈 `analyze_sales_trends`: Análise de tendências mensais
+- ⭐ **`get_sales_by_period`: Consultas seguras por período (NOVA!)**
+
+#### 🎯 **Nova Ferramenta - get_sales_by_period**
+Esta ferramenta **corrige automaticamente** o bug comum de `BETWEEN` com timestamps:
+
+**❌ Problema anterior:** 
+```sql
+-- Bug: Perdia vendas com timestamp diferente de 00:00:00
+WHERE sale_date BETWEEN '2025-02-01' AND '2025-02-28'
+-- Resultado: 17 vendas (incorreto)
+```
+
+**✅ Solução automática:**
+```sql  
+-- Usa funções seguras do SQLite
+WHERE strftime('%Y-%m', sale_date) = '2025-02'
+-- Resultado: 18 vendas (correto)
+```
+
+**Suporte para:**
+- Períodos mensais: `get_sales_by_period('month', '2025-02')`
+- Períodos diários: `get_sales_by_period('day', '2025-02-28')`
+- Períodos anuais: `get_sales_by_period('year', '2025')`
+- Períodos semanais: `get_sales_by_period('week', '2025-02-24')`
 
 ### 5. Inicie a API FastAPI
 Em outro terminal:
 ```bash
 # Inicia a API na porta 8000
 uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### 6. Use a Interface de Chat (Opcional)
+```bash
+# Interface interativa em português
+uv run python chat.py
 ```
 
 ## 🧪 Testando a API
@@ -125,6 +162,9 @@ curl http://localhost:8000/top-products
 # Pergunta sobre produto mais vendido
 curl "http://localhost:8000/sales-insights?question=Qual foi o produto mais vendido?"
 
+# ⭐ TESTE DA NOVA FUNCIONALIDADE - Períodos com timestamps
+curl "http://localhost:8000/sales-insights?question=quantas vendas ocorreram em fevereiro de 2025"
+
 # Pergunta sobre cliente
 curl "http://localhost:8000/sales-insights?question=Quem comprou mais produtos?"
 
@@ -136,7 +176,8 @@ curl "http://localhost:8000/sales-insights?question=Qual é o faturamento total?
 - "Qual foi o produto mais vendido?"
 - "Quantos clientes fizeram compras?"
 - "Qual categoria teve maior faturamento?"
-- "Quais vendas foram feitas em janeiro?"
+- **"Quantas vendas ocorreram em fevereiro de 2025?"** ⭐ (NOVO - timestamp-safe)
+- **"Quais foram as vendas do dia 28 de fevereiro?"** ⭐ (NOVO - timestamp-safe)
 - "Qual cliente gastou mais dinheiro?"
 - "Quantos produtos de cada categoria foram vendidos?"
 
@@ -145,7 +186,10 @@ curl "http://localhost:8000/sales-insights?question=Qual é o faturamento total?
 ### Tabelas:
 - **products**: 5 produtos (SKU001-SKU005)
 - **customers**: 5 clientes
-- **sales**: 33 vendas
+- **sales**: 33 vendas (**com timestamps completos YYYY-MM-DD HH:MM:SS**)
+
+### ⚠️ **Importante - Timestamps:**
+A coluna `sale_date` contém timestamps completos, não apenas datas. A nova ferramenta `get_sales_by_period` trata isso automaticamente.
 
 ### Dados de exemplo:
 ```sql
@@ -156,8 +200,8 @@ Product C (Category 2) - $15.75
 Product D (Category 3) - $30.00
 Product E (Category 4) - $25.00
 
--- Período de vendas
-2025-01-05 a 2025-03-02
+-- Período de vendas (com timestamps)
+2025-01-05 08:30:00 a 2025-03-02 16:45:30
 ```
 
 ## 🔧 Arquitetura
@@ -171,9 +215,30 @@ Product E (Category 4) - $25.00
          │                       │                       │
          ▼                       ▼                       ▼
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   SQLAlchemy    │    │   LangChain      │    │   SQLite DB     │
-│   Models        │    │   + Ollama       │    │   (sales.db)    │
+│   SQLAlchemy    │    │   LangChain      │    │   MCP Tools     │
+│   Models        │    │   + Ollama       │    │   (mcp_tools.py)│
 └─────────────────┘    └──────────────────┘    └─────────────────┘
+                                                         │
+                                                         ▼
+                                                ┌─────────────────┐
+                                                │   SQLite DB     │
+                                                │   (sales.db)    │
+                                                └─────────────────┘
+```
+
+### 📁 **Nova Estrutura de Arquivos:**
+```
+mcp-langchain/
+├── mcp_server.py        # 🚀 Servidor MCP principal
+├── mcp_tools.py         # 🔧 5 ferramentas MCP organizadas (NOVO)
+├── chat.py              # 💬 Interface de chat interativo (NOVO)
+├── app/
+│   ├── main.py          # FastAPI endpoints
+│   ├── ollama_mcp_service.py  # Integração Ollama+MCP
+│   ├── models.py        # SQLAlchemy models
+│   ├── database.py      # Configuração do banco
+│   └── constants.py     # Configurações centralizadas
+└── sales.db             # Banco SQLite
 ```
 
 ## 📝 Logs e Debugging
@@ -181,11 +246,13 @@ Product E (Category 4) - $25.00
 ### Ver logs da API:
 ```bash
 # Os logs aparecem no terminal onde você executou uvicorn
+# Busque por "Loaded 5 MCP tools" para confirmar a nova ferramenta
 ```
 
 ### Ver logs do MCP Server:
 ```bash
 # Os logs aparecem no terminal onde você executou mcp_server.py
+# Confirme que mostra "get_sales_by_period: Get sales for specific periods"
 ```
 
 ### Verificar se Ollama está funcionando:
@@ -220,6 +287,9 @@ uv run python mcp_server.py --port 8001
 uv run python setup_clean_database.py
 ```
 
+### ⭐ **Problema: Contagem de vendas incorreta por período**
+**Solução:** A nova ferramenta `get_sales_by_period` resolve automaticamente! Se ainda ocorrer, verifique se está usando a versão mais recente.
+
 ## 📚 Documentação da API
 
 Acesse a documentação interativa em:
@@ -228,14 +298,28 @@ Acesse a documentação interativa em:
 
 ## 🎨 Exemplos de Uso
 
-### Análise de Vendas:
+### Chat Interativo:
+```bash
+uv run python chat.py
+
+💬 Você: quantas vendas ocorreram em fevereiro de 2025
+🤖 Resposta: Em fevereiro de 2025, houve **18 vendas** registradas no sistema.
+
+📊 Detalhes complementares:
+- **Itens vendidos**: 60 unidades
+- **Faturamento total**: R$ 1.159,59
+- **Ticket médio**: R$ 64,42
+- **Período analisado**: 01/02/2025 a 28/02/2025
+```
+
+### Análise de Vendas via API:
 ```python
 import requests
 
 # Pergunta sobre análise de vendas
 response = requests.get(
     "http://localhost:8000/sales-insights",
-    params={"question": "Qual categoria de produto vendeu mais?"}
+    params={"question": "Quantas vendas em fevereiro de 2025?"}
 )
 
 print(response.json())
@@ -244,11 +328,12 @@ print(response.json())
 ### Resposta esperada:
 ```json
 {
-  "question": "Qual categoria de produto vendeu mais?",
-  "answer": "Baseado nos dados, Category 4 (Product E) teve o maior volume de vendas...",
-  "mcp_tools_used": ["query_sales_data", "get_sales_statistics"],
+  "question": "Quantas vendas em fevereiro de 2025?",
+  "answer": "Em fevereiro de 2025, houve **18 vendas** registradas no sistema...",
+  "mcp_tools_used": ["get_sales_by_period", "get_sales_statistics"],
   "model_used": "ollama:qwen3:30b",
-  "timestamp": "2025-01-17T10:30:00",
+  "context_date": "23 de junho de 2025",
+  "data_availability": "Os dados de vendas cobrem o período de janeiro a março de 2025 (56 dias de dados)",
   "error": null
 }
 ```
@@ -256,8 +341,27 @@ print(response.json())
 ## 🔒 Limitações de Segurança
 
 - O MCP Server aceita apenas consultas SELECT por segurança
-- Perguntas não relacionadas a vendas são rejeitadas
+- Perguntas não relacionadas a vendas são rejeitadas automaticamente
 - Validação de entrada em todos os endpoints
+- **Timestamp-safe queries** previnem SQL injection em consultas de data
+
+## ⭐ **Novidades da Versão Atual**
+
+### 🆕 **get_sales_by_period Tool**
+- ✅ **Correção automática** de bugs de timestamp
+- ✅ **Precisão 100%** em consultas por período
+- ✅ **Suporte para** mês, dia, ano e semana
+- ✅ **Respostas em português** com detalhes completos
+
+### 🔧 **Refatoração de Código**
+- ✅ **mcp_tools.py** - Todas as ferramentas organizadas
+- ✅ **mcp_server.py** - Servidor mais limpo
+- ✅ **Melhor manutenibilidade** e extensibilidade
+
+### 💬 **Interface de Chat**
+- ✅ **chat.py** - Terminal interativo
+- ✅ **Comandos em português** (sair, ajuda)
+- ✅ **Tratamento de erros** robusto
 
 ## 🎯 Teste Técnico - Checklist
 
@@ -270,6 +374,9 @@ print(response.json())
 ✅ **Endpoints**: `/sales-insights` e `/top-products`  
 ✅ **Documentação**: README completo e comentários no código  
 ✅ **Limitação de RAG**: Modelo não responde sem contexto do banco  
+⭐ **Timestamp-Safe**: Correção de bugs de consultas de data  
+⭐ **5 Ferramentas MCP**: Análise especializada e robusta  
+⭐ **Interface Chat**: Experiência de usuário aprimorada  
 
 ---
 
@@ -280,3 +387,5 @@ print(response.json())
 - Adicionar testes automatizados
 - Melhorar tratamento de erros
 - Adicionar métricas de performance
+- **Dashboard web interativo**
+- **Exportação de relatórios**
