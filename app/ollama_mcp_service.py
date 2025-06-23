@@ -4,9 +4,10 @@ Uses local Ollama model with MCP to access database
 """
 import asyncio
 import logging
+import datetime
 from typing import Dict, Any, Optional
 from langchain_ollama import ChatOllama
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_core.tools import Tool
@@ -22,6 +23,35 @@ from app.constants import (
 
 logger = logging.getLogger(__name__)
 
+def _get_current_datetime() -> str:
+    """Get current date and time formatted for the prompt"""
+    now = datetime.datetime.now()
+    return now.strftime("%Y-%m-%d %H:%M:%S")
+
+def _get_current_date() -> str:
+    """Get current date formatted for the prompt"""
+    import locale
+    try:
+        # Tentar definir locale para português
+        locale.setlocale(locale.LC_TIME, 'pt_BR.UTF-8')
+    except:
+        # Fallback se não conseguir definir locale
+        pass
+    
+    today = datetime.datetime.now()
+    # Mapear meses manualmente para garantir português
+    months_pt = {
+        1: 'janeiro', 2: 'fevereiro', 3: 'março', 4: 'abril',
+        5: 'maio', 6: 'junho', 7: 'julho', 8: 'agosto',
+        9: 'setembro', 10: 'outubro', 11: 'novembro', 12: 'dezembro'
+    }
+    
+    day = today.day
+    month = months_pt[today.month]
+    year = today.year
+    
+    return f"{day} de {month} de {year}"
+
 class OllamaMCPSalesService:
     """Service for generating sales insights using Ollama + MCP"""
     
@@ -30,7 +60,32 @@ class OllamaMCPSalesService:
         self.mcp_client = None
         self.agent = None
         self._initialized = False
+        self.system_prompt_template = None
     
+    def _create_system_prompt_with_date(self) -> str:
+        """Create system prompt with current date and context"""
+        current_date = _get_current_date()
+        current_datetime = _get_current_datetime()
+        
+        system_prompt = f"""Você é um especialista em análise de dados de vendas.
+
+CONTEXTO TEMPORAL:
+- Data atual: {current_date}
+- Data/hora atual: {current_datetime}
+- Quando o usuário mencionar "hoje", "esta semana", "este mês" ou "período recente", use a data atual como referência.
+
+INSTRUÇÕES:
+1. Responda sempre em português brasileiro
+2. Use as ferramentas MCP disponíveis para consultar o banco de dados
+3. Seja preciso com datas e períodos ao fazer consultas SQL
+4. Se os dados não cobrirem o período solicitado, explique claramente
+
+IMPORTANTE: Os dados de vendas no banco cobrem o período de janeiro 2025 a março 2025. Se o usuário perguntar sobre períodos fora dessa faixa, informe sobre a limitação dos dados disponíveis.
+
+Responda de forma clara e objetiva."""
+
+        return system_prompt
+
     async def initialize(self):
         """Initialize the Ollama model and MCP client"""
         if self._initialized:
@@ -69,11 +124,20 @@ class OllamaMCPSalesService:
             tools = await self.mcp_client.get_tools()
             logger.info(f"Loaded {len(tools)} MCP tools")
             
-            # Create agent with tools
-            self.agent = create_react_agent(self.llm, tools)
+            # Create custom prompt template with current date
+            system_prompt = self._create_system_prompt_with_date()
+            
+            # Create custom ChatPromptTemplate with date context
+            prompt_template = ChatPromptTemplate.from_messages([
+                ("system", system_prompt),
+                ("placeholder", "{messages}"),
+            ])
+            
+            # Create agent with tools and custom prompt
+            self.agent = create_react_agent(self.llm, tools, prompt=prompt_template)
             
             self._initialized = True
-            logger.info(f"OllamaMCPSalesService initialized successfully with {OLLAMA_MODEL}")
+            logger.info(f"OllamaMCPSalesService initialized successfully with {OLLAMA_MODEL} and date context")
             
         except Exception as e:
             logger.error(f"Failed to initialize OllamaMCPSalesService: {e}")
@@ -109,13 +173,14 @@ class OllamaMCPSalesService:
                     "answer": ERROR_QUESTION_NOT_SALES_RELATED,
                     "question": question,
                     "mcp_tools_used": [],
-                    "error": ERROR_QUESTION_NOT_RELATED
+                    "error": ERROR_QUESTION_NOT_RELATED,
+                    "context_date": _get_current_date()
                 }
             
             # Use the agent to process the question
-            logger.info(f"Processing question with {OLLAMA_MODEL}+MCP: {question}")
+            logger.info(f"Processing question with {OLLAMA_MODEL}+MCP and date context: {question}")
             
-            # Invoke the agent
+            # Invoke the agent with current date context
             result = await self.agent.ainvoke({
                 "messages": [("human", question)]
             })
@@ -141,7 +206,9 @@ class OllamaMCPSalesService:
                 "question": question,
                 "mcp_tools_used": mcp_tools,
                 "error": None,
-                "model_used": MODEL_DISPLAY_NAME
+                "model_used": MODEL_DISPLAY_NAME,
+                "context_date": _get_current_date(),
+                "context_datetime": _get_current_datetime()
             }
             
         except Exception as e:
@@ -150,7 +217,8 @@ class OllamaMCPSalesService:
                 "answer": ERROR_PROCESSING_QUESTION.format(error=str(e)),
                 "question": question,
                 "mcp_tools_used": [],
-                "error": str(e)
+                "error": str(e),
+                "context_date": _get_current_date()
             }
     
     async def close(self):
